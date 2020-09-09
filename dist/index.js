@@ -12,9 +12,9 @@ var htmlElemAttr = require('html-element-attributes');
 
 var isWhiteSpace = require('is-whitespace-character');
 
-var supportedElements = new Set(['link', 'atxHeading', 'strong', 'emphasis', 'deletion', 'code', 'setextHeading', 'fencedCode', 'reference', 'footnoteCall', 'autoLink']);
+var supportedElements = new Set(['link', 'atxHeading', 'strong', 'emphasis', 'deletion', 'code', 'setextHeading', 'fencedCode', 'reference', 'paragraph', 'footnoteCall', 'autoLink']);
 var blockElements = new Set(['atxHeading', 'setextHeading']);
-var particularElements = new Set(['fencedCode']);
+var particularElements = new Set(['fencedCode', 'paragraph']);
 var particularTokenize = {};
 
 var DOMEventHandler = require('./dom-event-handler.js');
@@ -31,6 +31,7 @@ var convTypeTag = {
   inlineCode: 'code',
   code: 'code',
   linkReference: 'a',
+  paragraph: 'p',
   '*': '*'
 };
 /* This function is a generic function that transform
@@ -328,8 +329,75 @@ function tokenizeFencedCode(oldParser, config) {
 
   return token;
 }
+/* This is a special modification of the function tokenizeGenerator
+ * to parse the paragraph.
+ * customAttr parser
+ */
+
+
+function tokenizeParagraph(oldParser, config) {
+  function token(eat, value, silent) {
+    // This we call the old tokenize
+    var self = this;
+    var eaten = oldParser.call(self, eat, value, silent);
+    var type = convTypeTag[eaten.type];
+
+    if (!eaten || !eaten.position || !eaten.children || eaten.children.length === 0) {
+      return undefined;
+    } // Looking for the last line of the last child.
+    // The last child must be of type text
+
+
+    var lastChild = eaten.children[eaten.children.length - 1];
+
+    if (!lastChild || !lastChild.type || lastChild.type !== 'text') {
+      return undefined;
+    }
+
+    var lcLines = lastChild.value.split('\n');
+
+    if (lcLines.length === 0) {
+      return undefined;
+    }
+
+    var attrs = lcLines[lcLines.length - 1];
+    var parsedAttr = parseAttr(attrs, 0, config.mdAttrConfig);
+
+    if (parsedAttr) {
+      if (!parsedAttr.eaten || parsedAttr.eaten !== attrs.trimEnd()) {
+        return undefined;
+      }
+
+      if (parsedAttr.eaten.trim()[0] !== '{' || parsedAttr.eaten.trim().slice(-1) !== '}') {
+        return undefined;
+      }
+
+      if (config.scope && config.scope !== 'none') {
+        var filtredProp = filterAttributes(parsedAttr.prop, config, type);
+
+        if (filtredProp !== {}) {
+          if (eaten.data) {
+            eaten.data.hProperties = filtredProp;
+          } else {
+            eaten.data = {
+              hProperties: filtredProp
+            };
+          }
+        }
+      }
+
+      lastChild.value = lcLines.slice(0, -1).join('\n');
+    }
+
+    return eaten;
+  } // Return the new tokenizer function
+
+
+  return token;
+}
 
 particularTokenize.fencedCode = tokenizeFencedCode;
+particularTokenize.paragraph = tokenizeParagraph;
 remarkAttr.SUPPORTED_ELEMENTS = supportedElements;
 module.exports = remarkAttr;
 /* Function that is exported */
